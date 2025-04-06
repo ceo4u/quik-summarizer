@@ -1,4 +1,14 @@
-# Youtube-Video-Summarizer
-This Application uses input Youtube URL to Extract text from the video. Then the extracted text will be used to create summary, top keywords, Sentiment analysis and keyframes.\
+📝 Quik-Summarizer
+Quik-Summarizer is a lightweight web application that summarizes long YouTube videos or text into short, easy-to-read summaries.
 
-Follow me on Youtube - www.youtube.com/@WiseCoder-rp2zn
+It uses:
+
+Python (main.py) for the backend with Flask
+
+HTML (index.html) for the frontend interface
+
+Transformers / Hugging Face models for generating summaries using AI
+
+Just paste a YouTube URL or text, and it will return a short summary — helping you save time and understand content faster.
+
+

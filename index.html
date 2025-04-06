@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuikSummarizer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #121212;
+            color: #fff;
+            margin: 0;
+            padding: 0;
+        }
+        header {
+            padding: 20px;
+            background-color: #1a1a1a;
+        }
+        h1 {
+            color: #9c27b0;
+            margin: 0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .main-title {
+            text-align: center;
+            font-size: 36px;
+            margin-bottom: 10px;
+        }
+        .sub-title {
+            text-align: center;
+            color: #ccc;
+            margin-bottom: 40px;
+        }
+        .input-container {
+            background-color: #1a1a1a;
+            padding: 30px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            background-color: #333;
+            color: #fff;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        select {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            background-color: #333;
+            color: #fff;
+            border-radius: 4px;
+            appearance: none;
+        }
+        button {
+            background-color: #9c27b0;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        button:hover {
+            background-color: #7b1fa2;
+        }
+        #loading {
+            display: none;
+            margin-top: 20px;
+            text-align: center;
+        }
+        #result {
+            display: none;
+            background-color: #1a1a1a;
+            padding: 30px;
+            border-radius: 8px;
+        }
+        .video-info {
+            display: flex;
+            margin-bottom: 20px;
+        }
+        .video-thumbnail {
+            width: 180px;
+            height: 100px;
+            background-color: #333;
+            margin-right: 20px;
+            background-size: cover;
+            background-position: center;
+        }
+        .video-details h2 {
+            margin-top: 0;
+            margin-bottom: 8px;
+        }
+        .key-points {
+            margin-top: 30px;
+        }
+        .key-points li {
+            margin-bottom: 8px;
+        }
+        .error-message {
+            color: #ff5252;
+            padding: 20px;
+            background-color: rgba(255, 82, 82, 0.1);
+            border-radius: 4px;
+            margin-top: 20px;
+            display: none;
+        }
+        footer {
+            text-align: center;
+            padding: 20px;
+            color: #888;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>QuikSummarizer</h1>
+    </header>
+
+    <div class="container">
+        <h2 class="main-title">Summarize YouTube Videos Instantly</h2>
+        <p class="sub-title">Save time by getting concise summaries of any YouTube video in seconds.<br>Just paste the URL below.</p>
+
+        <div class="input-container">
+            <div class="form-group">
+                <label for="youtube-url">YouTube Video URL</label>
+                <input type="text" id="youtube-url" placeholder="Paste YouTube URL (e.g., https://www.youtube.com/watch?v=dQw4w9WgXcQ)">
+            </div>
+
+            <div class="form-group">
+                <label for="summary-length">Summary Length</label>
+                <select id="summary-length">
+                    <option value="short">Short (1-2 paragraphs)</option>
+                    <option value="medium" selected>Medium (3-4 paragraphs)</option>
+                    <option value="long">Long (5+ paragraphs)</option>
+                </select>
+            </div>
+
+            <button id="generate-btn" onclick="generateSummary()">
+                <span>Generate Summary</span>
+            </button>
+            
+            <div class="error-message" id="error-message"></div>
+        </div>
+
+        <div id="loading">Analyzing video... This may take up to 30 seconds.</div>
+
+        <div id="result">
+            <div class="video-info">
+                <div class="video-thumbnail" id="video-thumbnail"></div>
+                <div class="video-details">
+                    <h2 id="video-title">Video Title</h2>
+                    <p id="video-channel">Channel Name</p>
+                    <p id="video-stats">Views • Duration</p>
+                </div>
+            </div>
+
+            <h3>Summary</h3>
+            <div id="summary-text"></div>
+
+            <div class="key-points">
+                <h3>Key Points</h3>
+                <ul id="key-points-list"></ul>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        © 2025 QuikSummarizer - Get instant summaries of YouTube videos
+    </footer>
+
+    <script>
+        function generateSummary() {
+            // Get values
+            const youtubeUrl = document.getElementById('youtube-url').value;
+            const summaryLength = document.getElementById('summary-length').value;
+            
+            // Validate URL
+            if (!youtubeUrl || !youtubeUrl.includes('youtube.com/watch?v=')) {
+                showError("Please enter a valid YouTube URL");
+                return;
+            }
+            
+            // Show loading, hide results and errors
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('result').style.display = 'none';
+            document.getElementById('error-message').style.display = 'none';
+            
+            // Prepare request data
+            const data = {
+                url: youtubeUrl,
+                length: summaryLength
+            };
+            
+            // Send POST request to backend
+            // Use the correct URL for your backend - adjust if needed
+            const apiUrl = window.location.protocol + '//' + window.location.hostname + ':5000/api/summarize';
+            
+            fetch(apiUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(errData => {
+                        throw new Error(errData.error || 'An error occurred');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Hide loading
+                document.getElementById('loading').style.display = 'none';
+                
+                // Display results
+                document.getElementById('video-title').textContent = data.title;
+                document.getElementById('video-channel').textContent = data.channel;
+                document.getElementById('video-stats').textContent = data.stats;
+                
+                // Set thumbnail
+                if (data.thumbnail) {
+                    document.getElementById('video-thumbnail').style.backgroundImage = `url(${data.thumbnail})`;
+                }
+                
+                // Set summary
+                document.getElementById('summary-text').textContent = data.summary;
+                
+                // Set key points
+                const keyPointsList = document.getElementById('key-points-list');
+                keyPointsList.innerHTML = '';
+                data.keyPoints.forEach(point => {
+                    const li = document.createElement('li');
+                    li.textContent = point;
+                    keyPointsList.appendChild(li);
+                });
+                
+                // Show result section
+                document.getElementById('result').style.display = 'block';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('loading').style.display = 'none';
+                showError(error.message || 'Failed to generate summary. Please try again.');
+            });
+        }
+        
+        function showError(message) {
+            const errorElement = document.getElementById('error-message');
+            errorElement.textContent = message;
+            errorElement.style.display = 'block';
+        }
+    </script>
+</body>
+</html>

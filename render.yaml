@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: quik-summarizer
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn main:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    plan: free
