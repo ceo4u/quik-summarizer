@@ -54,9 +54,30 @@ if not os.path.exists('index.html'):
         f.write("<!-- Frontend HTML will be here -->")
     logging.info("Created placeholder index.html")
 
-app = Flask(__name__, static_folder=".")
+# Create static folder if it doesn't exist
+if not os.path.exists('static'):
+    os.makedirs('static')
+    logging.info("Created static folder")
+
+# Initialize Flask app with proper static folder configuration
+app = Flask(__name__, static_folder="static", static_url_path="/static")
+
 # Enable CORS for all routes and all origins
 CORS(app, resources={r"/*": {"origins": "*", "allow_headers": "*", "methods": "*"}})
+
+# Add logging for requests
+@app.before_request
+def log_request_info():
+    logging.info(f"Request: {request.method} {request.path} {request.remote_addr}")
+
+# Add after request handler for CORS headers
+@app.after_request
+def after_request(response):
+    # Add CORS headers to all responses
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    return response
 
 # Function to extract YouTube video ID from URL
 def extract_video_id(url):
@@ -455,7 +476,40 @@ def health_check():
 # Serve the frontend
 @app.route('/')
 def index():
-    return send_from_directory('.', 'index.html')
+    try:
+        return send_from_directory('.', 'index.html')
+    except Exception as e:
+        logging.error(f"Error serving index.html: {str(e)}")
+        # Return a simple HTML page as fallback
+        return '''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>QuikSummarizer</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body { font-family: Arial; text-align: center; padding: 50px; }
+                h1 { color: #9c27b0; }
+                .error { color: red; }
+            </style>
+        </head>
+        <body>
+            <h1>QuikSummarizer</h1>
+            <p>There was an error loading the application.</p>
+            <p class="error">Please try refreshing the page or contact support.</p>
+        </body>
+        </html>
+        '''
+
+# Route to serve static files directly
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    try:
+        return send_from_directory('static', filename)
+    except Exception as e:
+        logging.error(f"Error serving static file {filename}: {str(e)}")
+        return "File not found", 404
 
 # For serving placeholder images
 @app.route('/api/placeholder/<width>/<height>')
@@ -470,12 +524,32 @@ def placeholder(width, height):
 
     return svg, 200, {'Content-Type': 'image/svg+xml'}
 
+# Handle OPTIONS requests for CORS preflight for /summarize
+@app.route('/summarize', methods=['OPTIONS'])
+def handle_summarize_options():
+    response = jsonify({})
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    return response
+
 # Original API Endpoint (keeping for backward compatibility)
-@app.route('/summarize', methods=['GET'])
+@app.route('/summarize', methods=['GET', 'POST'])
 def summarize_video_get():
-    video_url = request.args.get('video_url')
+    # Handle both GET and POST requests
+    if request.method == 'POST':
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        video_url = data.get('url')
+    else:  # GET request
+        video_url = request.args.get('video_url')
+
     if not video_url:
-        return jsonify({"error": "Missing video_url parameter"}), 400
+        return jsonify({"error": "Missing video URL parameter"}), 400
+
+    # Log the request for debugging
+    logging.info(f"Processing request for video URL: {video_url}")
 
     # Extract video ID
     video_id = extract_video_id(video_url)
@@ -536,19 +610,25 @@ def summarize_video_get():
         "summary": summary,
         "keywords": keywords,
         "topics": topics,
-        "sentiment": sentiment
+        "sentiment": sentiment,
+        # Add these fields for compatibility with the frontend
+        "title": f"Video {video_id}",
+        "channel": "YouTube Channel",
+        "stats": "YouTube Video",
+        "thumbnail": f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg",
+        "keyPoints": ["Key point 1", "Key point 2", "Key point 3", "Key point 4", "Key point 5"]
     })
 
     # Add CORS headers
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-    response.headers.add('Access-Control-Allow-Methods', 'GET')
+    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
 
     return response
 
-# Handle OPTIONS requests for CORS preflight
+# Handle OPTIONS requests for CORS preflight for /api/summarize
 @app.route('/api/summarize', methods=['OPTIONS'])
-def handle_options():
+def handle_api_options():
     response = jsonify({})
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
