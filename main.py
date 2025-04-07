@@ -14,6 +14,7 @@ import logging
 import time
 import os
 import requests
+import tempfile
 from urllib.parse import urlparse, parse_qs
 from flask_cors import CORS
 
@@ -21,17 +22,31 @@ from flask_cors import CORS
 logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# Check if NLTK data is available, but don't download during startup
-# (NLTK data should be downloaded during build phase)
+# Set up a custom NLTK data directory in a writable location
+# This is necessary for Render deployment
+logging.info("Setting up NLTK data...")
 try:
-    nltk.data.find('tokenizers/punkt')
-    nltk.data.find('corpora/stopwords')
-    nltk.data.find('corpora/wordnet')
-    logging.info("NLTK data is available")
-except LookupError:
-    logging.warning("NLTK data not found. This may cause issues with text processing.")
-    # Don't download during startup as it can cause timeouts
-    # The data should be downloaded during the build phase
+    # Create a temporary directory for NLTK data
+    nltk_data_dir = os.path.join(tempfile.gettempdir(), 'nltk_data')
+    os.makedirs(nltk_data_dir, exist_ok=True)
+    nltk.data.path.insert(0, nltk_data_dir)
+    logging.info(f"NLTK data directory set to: {nltk_data_dir}")
+
+    # Check if NLTK data is available, download if needed
+    try:
+        nltk.data.find('tokenizers/punkt')
+        nltk.data.find('corpora/stopwords')
+        nltk.data.find('corpora/wordnet')
+        logging.info("NLTK data is available")
+    except LookupError:
+        logging.warning("NLTK data not found. Downloading now...")
+        # Download to the custom directory
+        nltk.download('punkt', download_dir=nltk_data_dir)
+        nltk.download('stopwords', download_dir=nltk_data_dir)
+        nltk.download('wordnet', download_dir=nltk_data_dir)
+        logging.info("NLTK data downloaded successfully")
+except Exception as e:
+    logging.error(f"Error with NLTK data: {str(e)}")
 
 # Create index.html if it doesn't exist
 if not os.path.exists('index.html'):
@@ -40,7 +55,8 @@ if not os.path.exists('index.html'):
     logging.info("Created placeholder index.html")
 
 app = Flask(__name__, static_folder=".")
-CORS(app)
+# Enable CORS for all routes and all origins
+CORS(app, resources={r"/*": {"origins": "*", "allow_headers": "*", "methods": "*"}})
 
 # Function to extract YouTube video ID from URL
 def extract_video_id(url):
@@ -55,7 +71,7 @@ def extract_video_id(url):
         if match:
             video_id = match.group(1)
             break
-    
+
     # If patterns didn't work, try parsing the URL
     if not video_id:
         parsed_url = urlparse(url)
@@ -65,7 +81,7 @@ def extract_video_id(url):
                 video_id = query_params['v'][0]
         elif 'youtu.be' in parsed_url.netloc:
             video_id = parsed_url.path.lstrip('/')
-            
+
     return video_id
 
 # Improved function to get video info from the YouTube API
@@ -78,20 +94,20 @@ def get_video_info(video_id):
         # url = f"https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id={video_id}&key={api_key}"
         # response = requests.get(url)
         # data = response.json()
-        
+
         # For now, we'll extract some info from the video page as a fallback
         try:
             url = f"https://www.youtube.com/watch?v={video_id}"
             response = requests.get(url)
-            
+
             # Very basic parsing to extract title (not recommended for production)
             title_match = re.search(r'<title>(.*?)</title>', response.text)
             title = title_match.group(1).replace(' - YouTube', '') if title_match else f"Video {video_id}"
-            
+
             # Extract channel name (basic approach)
             channel_match = re.search(r'"channelName":"(.*?)"', response.text)
             channel = channel_match.group(1) if channel_match else "YouTube Channel"
-            
+
             return {
                 "title": title,
                 "channel": channel,
@@ -107,7 +123,7 @@ def get_video_info(video_id):
                 "stats": "YouTube Video",
                 "thumbnail": f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg"
             }
-            
+
     except Exception as e:
         logging.error(f"Error in video info retrieval: {str(e)}")
         return {
@@ -149,6 +165,73 @@ def split_text(text, chunk_size=500):  # Reduced chunk size for safety
     if current_chunk:
         yield ' '.join(current_chunk)
 
+# Fallback summarization function that doesn't use transformers
+def generate_fallback_summary(text, length='medium'):
+    try:
+        # Clean the text
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        # Split into sentences
+        sentences = sent_tokenize(text)
+
+        if not sentences:
+            return "No text available to summarize."
+
+        # Calculate sentence scores based on word frequency
+        word_frequencies = {}
+
+        # Count word frequencies
+        for sentence in sentences:
+            for word in word_tokenize(sentence.lower()):
+                if word not in stopwords.words('english'):
+                    if word not in word_frequencies:
+                        word_frequencies[word] = 1
+                    else:
+                        word_frequencies[word] += 1
+
+        # Normalize frequencies
+        if word_frequencies:
+            max_frequency = max(word_frequencies.values())
+            for word in word_frequencies:
+                word_frequencies[word] = word_frequencies[word] / max_frequency
+
+        # Score sentences
+        sentence_scores = {}
+        for i, sentence in enumerate(sentences):
+            for word in word_tokenize(sentence.lower()):
+                if word in word_frequencies:
+                    if i not in sentence_scores:
+                        sentence_scores[i] = word_frequencies[word]
+                    else:
+                        sentence_scores[i] += word_frequencies[word]
+
+        # Determine summary length based on parameter
+        if length == 'short':
+            summary_length = min(3, len(sentences))
+        elif length == 'long':
+            summary_length = min(7, len(sentences))
+        else:  # medium
+            summary_length = min(5, len(sentences))
+
+        # Get top sentences
+        top_sentences = sorted(sentence_scores.items(), key=lambda x: x[1], reverse=True)[:summary_length]
+        top_sentences = sorted(top_sentences, key=lambda x: x[0])  # Sort by position in text
+
+        # Create summary
+        summary = ' '.join([sentences[i] for i, _ in top_sentences])
+
+        return summary
+    except Exception as e:
+        logging.error(f"Error in fallback summarization: {str(e)}")
+        # Last resort fallback
+        sentences = sent_tokenize(text)
+        if sentences and len(sentences) >= 3:
+            return sentences[0] + ' ' + sentences[1] + ' ' + sentences[2]
+        elif sentences:
+            return ' '.join(sentences[:min(len(sentences), 3)])
+        else:
+            return "Unable to generate summary."
+
 # Improved function to summarize text
 def summarize_text(text, length='medium'):
     try:
@@ -157,14 +240,14 @@ def summarize_text(text, length='medium'):
         text = re.sub(r'advertisement+', '', text)
         # Remove excessive whitespace
         text = re.sub(r'\s+', ' ', text).strip()
-        
+
         # Limit input length for summarization model
         if len(text) > 10000:
             text = text[:10000]
-            
+
         # Use smaller chunks for better processing
         text_chunks = list(split_text(text, chunk_size=1000))
-        
+
         # Set summary parameters based on length preference
         if length == 'short':
             max_length = 75
@@ -175,28 +258,32 @@ def summarize_text(text, length='medium'):
         else:  # medium is default
             max_length = 150
             min_length = 75
-        
+
         # Create a new pipeline instance each time (slower but more reliable)
         try:
-            summarization_pipeline = pipeline("summarization", model="facebook/bart-base")
+            # Use a smaller, faster model that's more likely to work on Render
+            summarization_pipeline = pipeline("summarization", model="sshleifer/distilbart-cnn-6-6")
+            logging.info("Loaded summarization model successfully")
         except Exception as e:
             logging.error(f"Failed to load summarization model: {str(e)}")
-            return "Unable to generate summary due to model loading error."
-        
+            # Try a fallback approach - extract key sentences
+            logging.warning("Using fallback summarization method")
+            return generate_fallback_summary(text, length)
+
         summaries = []
         for chunk in text_chunks[:3]:  # Process up to 3 chunks to avoid excessive processing
             try:
                 if not chunk or len(chunk) < 50:
                     continue
-                    
+
                 summary = summarization_pipeline(
-                    chunk, 
-                    max_length=max_length, 
+                    chunk,
+                    max_length=max_length,
                     min_length=min_length,
                     do_sample=False,
                     truncation=True
                 )
-                
+
                 if summary and len(summary) > 0:
                     summary_text = summary[0]['summary_text']
                     # Clean up the summary text
@@ -208,18 +295,18 @@ def summarize_text(text, length='medium'):
                 sentences = sent_tokenize(chunk)
                 if sentences and len(sentences) > 1:
                     summaries.append(sentences[0])
-        
+
         if not summaries:
             return "Unable to generate a summary for this video."
-            
+
         # Join the summaries with proper spacing
         final_summary = ' '.join(summaries)
-        
+
         # Add periods if missing at the end of sentences
         final_summary = re.sub(r'([a-zA-Z])\s+([A-Z])', r'\1. \2', final_summary)
-        
+
         return final_summary
-        
+
     except Exception as e:
         logging.error(f"Summarization error: {str(e)}")
         return "An error occurred during summarization."
@@ -230,20 +317,20 @@ def extract_keywords(text):
         # Clean the text
         text = re.sub(r'advertisement+', '', text)
         text = re.sub(r'\s+', ' ', text).strip()
-        
+
         # Use NLTK for better keyword extraction
         stop_words = set(stopwords.words('english'))
         lemmatizer = WordNetLemmatizer()
-        
+
         # Split into sentences and select a subset for processing
         sentences = sent_tokenize(text)
         processed_text = ' '.join(sentences[:20])  # Use first 20 sentences
-        
+
         # Tokenize and normalize words
         words = word_tokenize(processed_text.lower())
-        words = [lemmatizer.lemmatize(word) for word in words 
+        words = [lemmatizer.lemmatize(word) for word in words
                 if word.isalnum() and len(word) > 2 and word not in stop_words]
-        
+
         # Count word frequencies
         word_freq = {}
         for word in words:
@@ -251,31 +338,31 @@ def extract_keywords(text):
                 word_freq[word] += 1
             else:
                 word_freq[word] = 1
-        
+
         # Get the most frequent words
         sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
         keywords = [word for word, _ in sorted_words[:8]]
-        
+
         # Filter out common words that aren't useful as keywords
         common_words = {'video', 'going', 'like', 'just', 'get', 'know', 'make', 'really', 'thing', 'way', 'time'}
         keywords = [word for word in keywords if word not in common_words]
-        
+
         return keywords[:5]  # Return top 5 filtered keywords
-        
+
     except Exception as e:
         logging.error(f"Error extracting keywords: {str(e)}")
         return ["Unable to extract keywords"]
-    
+
 # New function to generate meaningful key points
 def generate_key_points(text, keywords):
     try:
         # Use TextBlob for sentiment analysis
         analysis = TextBlob(text)
         sentiment = analysis.sentiment
-        
+
         # Start with an empty list of key points
         key_points = []
-        
+
         # Add points based on the top keywords
         if keywords and len(keywords) >= 3:
             for keyword in keywords[:3]:
@@ -292,7 +379,7 @@ def generate_key_points(text, keywords):
                     key_points.append(point)
                 else:
                     key_points.append(f"The video discusses {keyword}")
-        
+
         # Add sentiment-based point
         if sentiment.polarity > 0.2:
             key_points.append("The content presents a positive perspective on the topic")
@@ -300,7 +387,7 @@ def generate_key_points(text, keywords):
             key_points.append("The content presents critical or cautionary viewpoints")
         else:
             key_points.append("The content maintains a balanced perspective")
-            
+
         # Add style-based point
         if sentiment.subjectivity > 0.6:
             key_points.append("The video focuses on opinions and subjective analysis")
@@ -308,11 +395,11 @@ def generate_key_points(text, keywords):
             key_points.append("The video emphasizes factual information and objective data")
         else:
             key_points.append("The video balances factual information with analysis")
-            
+
         # Ensure we have at least 5 points
         if len(key_points) < 5:
             key_points.append("The video provides detailed explanations about the topic")
-            
+
         return key_points
     except Exception as e:
         logging.error(f"Error generating key points: {str(e)}")
@@ -323,7 +410,7 @@ def generate_key_points(text, keywords):
             "Multiple aspects of the topic are covered",
             "The video offers insights on the subject matter"
         ]
-        
+
 # Function to perform topic modeling (LDA)
 def topic_modeling(text):
     try:
@@ -355,10 +442,15 @@ def topic_modeling(text):
 # Health check endpoint
 @app.route('/health')
 def health_check():
-    return jsonify({
+    response = jsonify({
         "status": "ok",
         "message": "Service is running"
     })
+    # Add CORS headers
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    response.headers.add('Access-Control-Allow-Methods', 'GET')
+    return response
 
 # Serve the frontend
 @app.route('/')
@@ -375,7 +467,7 @@ def placeholder(width, height):
             Placeholder {width}x{height}
         </text>
     </svg>'''
-    
+
     return svg, 200, {'Content-Type': 'image/svg+xml'}
 
 # Original API Endpoint (keeping for backward compatibility)
@@ -439,13 +531,29 @@ def summarize_video_get():
     # Log successful processing
     logging.info(f"Successfully processed video ID: {video_id}")
 
-    # Return JSON response
-    return jsonify({
+    # Create JSON response
+    response = jsonify({
         "summary": summary,
         "keywords": keywords,
         "topics": topics,
         "sentiment": sentiment
     })
+
+    # Add CORS headers
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    response.headers.add('Access-Control-Allow-Methods', 'GET')
+
+    return response
+
+# Handle OPTIONS requests for CORS preflight
+@app.route('/api/summarize', methods=['OPTIONS'])
+def handle_options():
+    response = jsonify({})
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+    return response
 
 # Updated API endpoint for frontend integration
 @app.route('/api/summarize', methods=['POST'])
@@ -453,10 +561,10 @@ def summarize_video_api():
     data = request.json
     if not data:
         return jsonify({"error": "No data provided"}), 400
-        
+
     video_url = data.get('url')
     summary_length = data.get('length', 'medium')
-    
+
     if not video_url:
         return jsonify({"error": "Missing video URL"}), 400
 
@@ -465,10 +573,10 @@ def summarize_video_api():
         video_id = extract_video_id(video_url)
         if not video_id:
             return jsonify({"error": "Invalid YouTube URL"}), 400
-            
+
         # Get video info
         video_info = get_video_info(video_id)
-        
+
         # Get transcript
         transcript, error = get_video_transcript(video_id)
         if error:
@@ -476,24 +584,24 @@ def summarize_video_api():
 
         # Process transcript
         video_text = ' '.join([line['text'] for line in transcript])
-        
+
         # Clean the text
         video_text = re.sub(r'[^\w\s.,?!-]', '', video_text)
         video_text = re.sub(r'\s+', ' ', video_text).strip()
-        
+
         # Extract keywords (do this before truncating text)
         keywords = extract_keywords(video_text)
-        
+
         # Limit text length for processing
         if len(video_text) > 15000:
             video_text = video_text[:15000]
-            
+
         # Generate summary with specified length
         summary = summarize_text(video_text, summary_length)
-        
+
         # Generate meaningful key points
         key_points = generate_key_points(video_text, keywords)
-        
+
         # Return comprehensive result
         result = {
             "title": video_info["title"],
@@ -504,20 +612,30 @@ def summarize_video_api():
             "keyPoints": key_points,
             "keywords": keywords  # Include keywords as additional data
         }
-        
+
         # Log successful processing
         logging.info(f"Successfully processed video ID: {video_id}")
-        
-        return jsonify(result)
-        
+
+        # Create response with CORS headers
+        response = jsonify(result)
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+
+        return response
+
     except Exception as e:
         logging.error(f"Error processing video: {str(e)}")
-        return jsonify({"error": f"Error processing video: {str(e)}"}), 500
+        error_response = jsonify({"error": f"Error processing video: {str(e)}"})
+        error_response.headers.add('Access-Control-Allow-Origin', '*')
+        error_response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        error_response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        return error_response, 500
 
 if __name__ == "__main__":
     try:
         logging.info("Starting QuikSummarizer API")
-        
+
         # Get port from environment variable for Render compatibility
         port = int(os.environ.get("PORT", 5000))
         logging.info(f"Server starting on 0.0.0.0:{port}")
