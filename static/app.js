@@ -114,7 +114,7 @@ function generateSummary() {
             showError('YouTube is temporarily limiting our access. Please try again in a few minutes.');
         } else if (error.status === 404 && error.responseData && error.responseData.thumbnail) {
             // No transcript available but we have video info
-            showError('This video doesn't have captions/transcripts available. Try another video.');
+            showError('This video does not have captions/transcripts available. Try another video.');
 
             // Show a partial result with the video thumbnail
             document.getElementById('video-thumbnail').style.backgroundImage =

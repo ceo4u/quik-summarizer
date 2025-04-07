@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QuikSummarizer</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="static/styles.css">
     <!-- Add meta tag for better mobile experience -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Add meta description for SEO -->
@@ -12,7 +12,7 @@
     <!-- Add favicon link -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📝</text></svg>">
     <!-- Preload the JS file -->
-    <link rel="preload" href="/static/app.js" as="script">
+    <link rel="preload" href="static/app.js" as="script">
 </head>
 <body>
     <header>
@@ -72,6 +72,94 @@
     </footer>
 
     <!-- Load the external JavaScript file -->
-    <script src="/static/app.js"></script>
+    <script src="static/app.js"></script>
+
+    <!-- Fallback script in case the external file fails to load -->
+    <script>
+        // Check if generateSummary function exists, if not define it
+        if (typeof generateSummary !== 'function') {
+            console.warn('External JS file not loaded properly. Using fallback script.');
+
+            function generateSummary() {
+                // Get values
+                const youtubeUrl = document.getElementById('youtube-url').value;
+                const summaryLength = document.getElementById('summary-length').value;
+
+                // Validate URL
+                if (!youtubeUrl || !youtubeUrl.includes('youtube.com/watch?v=')) {
+                    showError("Please enter a valid YouTube URL");
+                    return;
+                }
+
+                // Show loading, hide results and errors
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('result').style.display = 'none';
+                document.getElementById('error-message').style.display = 'none';
+
+                // Prepare request data
+                const data = {
+                    url: youtubeUrl,
+                    length: summaryLength
+                };
+
+                // Send POST request to backend
+                fetch('api/summarize', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    // Hide loading
+                    document.getElementById('loading').style.display = 'none';
+
+                    if (data.error) {
+                        showError(data.error);
+                        return;
+                    }
+
+                    // Display results
+                    document.getElementById('video-title').textContent = data.title || 'Video Title';
+                    document.getElementById('video-channel').textContent = data.channel || 'Channel';
+                    document.getElementById('video-stats').textContent = data.stats || 'Stats';
+
+                    // Set thumbnail
+                    if (data.thumbnail) {
+                        document.getElementById('video-thumbnail').style.backgroundImage = `url(${data.thumbnail})`;
+                    }
+
+                    // Set summary
+                    document.getElementById('summary-text').textContent = data.summary || 'No summary available';
+
+                    // Set key points
+                    const keyPointsList = document.getElementById('key-points-list');
+                    keyPointsList.innerHTML = '';
+                    if (data.keyPoints && data.keyPoints.length > 0) {
+                        data.keyPoints.forEach(point => {
+                            const li = document.createElement('li');
+                            li.textContent = point;
+                            keyPointsList.appendChild(li);
+                        });
+                    }
+
+                    // Show result section
+                    document.getElementById('result').style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('loading').style.display = 'none';
+                    showError('Failed to generate summary. Please try again.');
+                });
+            }
+
+            function showError(message) {
+                const errorElement = document.getElementById('error-message');
+                errorElement.textContent = message;
+                errorElement.style.display = 'block';
+            }
+        }
+    </script>
 </body>
 </html>
