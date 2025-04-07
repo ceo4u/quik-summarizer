@@ -8,6 +8,8 @@ from sklearn.decomposition import LatentDirichletAllocation
 from transformers import pipeline
 from textblob import TextBlob
 from functools import lru_cache
+# Import our transcript proxy for alternative sources
+import transcript_proxy
 import re
 import nltk
 import logging
@@ -15,6 +17,7 @@ import time
 import os
 import requests
 import tempfile
+import random
 from urllib.parse import urlparse, parse_qs
 from flask_cors import CORS
 
@@ -154,22 +157,63 @@ def get_video_info(video_id):
             "thumbnail": f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg"
         }
 
-# Function to get video transcript with caching
+# Function to get video transcript with caching, rate limiting and retries
 @lru_cache(maxsize=100)  # Cache up to 100 video transcripts
 def get_video_transcript(video_id):
-    try:
-        start_time = time.time()
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        if not transcript:
-            return None, "No transcript available for this video."
-        logging.info(f"Transcript fetched in {time.time() - start_time:.2f} seconds")
-        return transcript, None
-    except TranscriptsDisabled:
-        return None, "Transcripts are disabled for this video."
-    except NoTranscriptFound:
-        return None, "No transcript found for this video."
-    except Exception as e:
-        return None, str(e)
+    max_retries = 3
+    retry_delay = 2  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            start_time = time.time()
+
+            # Add a small random delay to avoid rate limiting
+            if attempt > 0:
+                delay = retry_delay * (attempt + 1) + (random.random() * 2)
+                logging.info(f"Retry attempt {attempt+1}/{max_retries} for video {video_id}. Waiting {delay:.2f} seconds...")
+                time.sleep(delay)
+
+            # Try to get the transcript
+            transcript = YouTubeTranscriptApi.get_transcript(video_id)
+
+            if not transcript:
+                return None, "No transcript available for this video."
+
+            logging.info(f"Transcript fetched in {time.time() - start_time:.2f} seconds")
+            return transcript, None
+
+        except TranscriptsDisabled:
+            # No need to retry for these specific errors
+            return None, "Transcripts are disabled for this video."
+
+        except NoTranscriptFound:
+            # No need to retry for these specific errors
+            return None, "No transcript found for this video."
+
+        except Exception as e:
+            error_message = str(e)
+            logging.warning(f"Error fetching transcript (attempt {attempt+1}/{max_retries}): {error_message}")
+
+            # Check if it's a rate limiting error
+            if "Too Many Requests" in error_message or "429" in error_message:
+                if attempt < max_retries - 1:
+                    # Will retry after delay
+                    continue
+                else:
+                    # Try alternative sources when YouTube API is rate limited
+                    logging.info(f"YouTube API rate limited. Trying alternative sources for video {video_id}")
+                    alt_transcript, alt_error = transcript_proxy.get_transcript_from_alternative_source(video_id)
+
+                    if alt_transcript:
+                        logging.info(f"Successfully retrieved transcript from alternative source for video {video_id}")
+                        return alt_transcript, None
+                    else:
+                        # If alternative sources also failed, return the error
+                        logging.warning(f"Alternative sources also failed for video {video_id}: {alt_error}")
+                        return None, "YouTube is rate limiting requests and alternative sources failed. Please try again in a few minutes."
+            else:
+                # For other errors, no need to retry
+                return None, f"Could not retrieve a transcript for the video. {error_message}"
 
 # Function to split text into chunks
 def split_text(text, chunk_size=500):  # Reduced chunk size for safety
@@ -559,7 +603,26 @@ def summarize_video_get():
     # Get transcript
     transcript, error = get_video_transcript(video_id)
     if error:
-        return jsonify({"error": error}), 400
+        # Check if we should provide a more user-friendly error message
+        if "rate limiting" in error.lower():
+            return jsonify({
+                "error": "YouTube is temporarily limiting our access. Please try again in a few minutes.",
+                "details": error
+            }), 429  # Use proper rate limit status code
+        elif "no transcript" in error.lower() or "transcripts are disabled" in error.lower():
+            # For videos without transcripts, return a specific error
+            return jsonify({
+                "error": "This video doesn't have captions/transcripts available.",
+                "details": error,
+                "title": f"Video {video_id}",
+                "thumbnail": f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg"
+            }), 404
+        else:
+            # Generic error
+            return jsonify({
+                "error": "Could not process this video.",
+                "details": error
+            }), 400
 
     # Combine transcript text
     try:
@@ -660,7 +723,35 @@ def summarize_video_api():
         # Get transcript
         transcript, error = get_video_transcript(video_id)
         if error:
-            return jsonify({"error": error}), 400
+            # Check if we should provide a more user-friendly error message
+            if "rate limiting" in error.lower():
+                error_response = jsonify({
+                    "error": "YouTube is temporarily limiting our access. Please try again in a few minutes.",
+                    "details": error
+                })
+                error_response.headers.add('Access-Control-Allow-Origin', '*')
+                error_response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+                return error_response, 429  # Use proper rate limit status code
+            elif "no transcript" in error.lower() or "transcripts are disabled" in error.lower():
+                # For videos without transcripts, return a specific error
+                error_response = jsonify({
+                    "error": "This video doesn't have captions/transcripts available.",
+                    "details": error,
+                    "title": f"Video {video_id}",
+                    "thumbnail": f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg"
+                })
+                error_response.headers.add('Access-Control-Allow-Origin', '*')
+                error_response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+                return error_response, 404
+            else:
+                # Generic error
+                error_response = jsonify({
+                    "error": "Could not process this video.",
+                    "details": error
+                })
+                error_response.headers.add('Access-Control-Allow-Origin', '*')
+                error_response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+                return error_response, 400
 
         # Process transcript
         video_text = ' '.join([line['text'] for line in transcript])
