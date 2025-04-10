@@ -27,8 +27,8 @@
             <div class="form-group">
                 <label for="youtube-url">YouTube Video URL</label>
                 <input type="text" id="youtube-url" placeholder="Paste YouTube URL (e.g., https://www.youtube.com/watch?v=dQw4w9WgXcQ)">
+                <!-- Helper text without sample video link -->
                 <div class="url-helper">
-                    <p>Try this sample video with captions: <a href="#" onclick="document.getElementById('youtube-url').value='https://www.youtube.com/watch?v=dQw4w9WgXcQ'; return false;">Rick Astley - Never Gonna Give You Up</a></p>
                     <p class="tip">Note: Only videos with captions/subtitles can be summarized</p>
                 </div>
             </div>
@@ -160,12 +160,8 @@
 
             function showError(message) {
                 const errorElement = document.getElementById('error-message');
-                // Check if the message contains HTML
-                if (message.includes('<') && message.includes('>')) {
-                    errorElement.innerHTML = message;
-                } else {
-                    errorElement.textContent = message;
-                }
+                // We're no longer using HTML in error messages
+                errorElement.textContent = message;
                 errorElement.style.display = 'block';
             }
         }
