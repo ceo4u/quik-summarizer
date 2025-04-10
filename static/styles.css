@@ -51,6 +51,27 @@ input[type="text"] {
     border-radius: 4px;
     box-sizing: border-box;
 }
+
+.url-helper {
+    margin-top: 8px;
+    font-size: 14px;
+    color: #aaa;
+}
+
+.url-helper a {
+    color: #9c27b0;
+    text-decoration: none;
+}
+
+.url-helper a:hover {
+    text-decoration: underline;
+}
+
+.url-helper .tip {
+    margin-top: 4px;
+    font-style: italic;
+    color: #ff9800;
+}
 select {
     width: 100%;
     padding: 12px;
@@ -117,6 +138,16 @@ button:hover {
     display: none;
     font-weight: bold;
     border-left: 4px solid #ff5252;
+}
+
+.error-message a {
+    color: #9c27b0;
+    text-decoration: underline;
+    font-weight: bold;
+}
+
+.error-message a:hover {
+    color: #7b1fa2;
 }
 footer {
     text-align: center;

@@ -163,6 +163,32 @@ def get_video_transcript(video_id):
     max_retries = 3
     retry_delay = 2  # seconds
 
+    # First, check if the video has available transcripts
+    try:
+        # List available transcripts without fetching them
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        available_languages = []
+
+        # Try to find an English transcript first
+        has_english = False
+        for transcript in transcript_list:
+            lang_code = transcript.language_code
+            available_languages.append(lang_code)
+            if lang_code.startswith('en'):
+                has_english = True
+
+        logging.info(f"Available transcript languages for video {video_id}: {available_languages}")
+
+        if not available_languages:
+            return None, "No transcripts available for this video. Try a video with captions."
+
+    except Exception as e:
+        error_msg = str(e)
+        logging.warning(f"Error checking transcript availability: {error_msg}")
+        if "Subtitles are disabled for this video" in error_msg:
+            return None, "Subtitles are disabled for this video. Try another video with captions."
+
+    # Now try to get the actual transcript
     for attempt in range(max_retries):
         try:
             start_time = time.time()
@@ -173,13 +199,20 @@ def get_video_transcript(video_id):
                 logging.info(f"Retry attempt {attempt+1}/{max_retries} for video {video_id}. Waiting {delay:.2f} seconds...")
                 time.sleep(delay)
 
-            # Try to get the transcript
-            transcript = YouTubeTranscriptApi.get_transcript(video_id)
+            # Try to get the transcript, preferring English if available
+            if has_english:
+                try:
+                    transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+                except Exception:
+                    # If English fails, try any available language
+                    transcript = YouTubeTranscriptApi.get_transcript(video_id)
+            else:
+                transcript = YouTubeTranscriptApi.get_transcript(video_id)
 
-            if not transcript:
-                return None, "No transcript available for this video."
+            if not transcript or len(transcript) < 5:  # Ensure we have enough content
+                return None, "Transcript is too short to generate a meaningful summary."
 
-            logging.info(f"Transcript fetched in {time.time() - start_time:.2f} seconds")
+            logging.info(f"Transcript fetched in {time.time() - start_time:.2f} seconds with {len(transcript)} segments")
             return transcript, None
 
         except TranscriptsDisabled:
